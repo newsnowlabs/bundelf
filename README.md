@@ -31,11 +31,11 @@ Relative library paths are the most flexible, so this is the default.
 
 ## How does BundELF work?
 
-In short, BundELF works by modifying the interpreter RPATH records inside the ELF headers of your needed binaries and their dynamic library dependendies. This avoid the need to set the `LD_LIBRARY_PATH` to override the linker's search path as well as issues that can arise when using it.
+In short, BundELF works by modifying the interpreter RPATH records inside the ELF headers of your needed binaries and their dynamic library dependendies. This avoid the need to set the `LD_LIBRARY_PATH` to override the linker's search path as well as issues that can arise when using that approach.
 
 In practice, the process is a little more involved. Here's what BundELF does:
 
-1. Copy your needed binary executables to the bundle location.
+1. Copy your needed binary executables to the bundle location. If fully-qualified filepaths are given, they will be used, otherwise the binary will be located on the `PATH` using `which`.
 2. Copy any specifically needed application folders (e.g. Node apps) to the bundle location, and scan them for any contained executable binaries or dynamic libraries.
 3. Detect the dynamic library dependencies of each binary.
 4. Scan any specifically-needed extra dynamic library folders for additional libraries to bundle.
@@ -46,7 +46,7 @@ In practice, the process is a little more involved. Here's what BundELF does:
 9. Test every bundled binary and dynamic library to check that the linker's resolution of dynamic library dependencies will _only_ use files from inside the bundle, and not inadvertently (due to bug or misconfiguration) attempt to load any libraries from the source system.
 
 N.B. `BUNDELF_CODE_PATH` can be different to `BUNDELF_EXEC_PATH`, to allow for
-     mounting the former at `BUNDELF_EXEC_PATH`
+     mounting the former at `BUNDELF_EXEC_PATH`.
 
 ### Inputs
 
@@ -54,7 +54,7 @@ BundELF is controlled through the following environment variables:
 
 - `BUNDELF_CODE_PATH` - [mandatory] the bundle location, a path where binaries and libraries will be copied to e.g. `/opt/bundle/mybundle`.
 - `BUNDELF_EXEC_PATH` - [optional] the path where binaries and libraries will be _executed from_ (defaults to `BUNDELF_CODE_PATH`) - useful where you are building the bundle at a one location and intend to copy or mount it at another location ()`BUNDELF_EXEC_PATH`) before executing.
-- `BUNDELF_BINARIES` - [optional] list of specific binaries to be scanned and copied e.g. `"busybox ip bash"`
+- `BUNDELF_BINARIES` - [optional] list of specific binaries to be scanned and copied e.g. `"busybox ip bash /path/to/myapp"`
 - `BUNDELF_DYNAMIC_PATHS` - [optional] list optional additional paths (e.g. Node application trees) to be scanned and copied e.g. `/usr/src/myapp`
 - `BUNDELF_EXTRA_LIBS` - [optional] list extra library paths to be scanned and copied (e.g. `/usr/lib/xtables /usr/libexec/coreutils /usr/lib/qemu/*.so`)
 = `BUNDELF_MERGE_BINDIRS` - [optional] set to non-empty, makes specified binaries be copied to `$BUNDELF_CODE_PATH/bin`
@@ -63,6 +63,14 @@ BundELF is controlled through the following environment variables:
 - `BUNDELF_EXTRA_SYSTEM_LIB_PATHS` - [optional] list of extra system library paths to be added to the RPATH
 
 N.B. At least one of `BUNDELF_BINARIES` or `BUNDELF_DYNAMIC_PATHS` must be provided.
+
+## Examples
+
+```
+BUNDELF_BINARIES="node busybox curl bash git /usr/libexec/git-core/git /usr/libexec/git-core/" \
+BUNDELF_CODE_PATH="/opt/bundelf/myappbundle" \
+make-bundelf-bundle.sh --bundle
+```
 
 ## See also
 
