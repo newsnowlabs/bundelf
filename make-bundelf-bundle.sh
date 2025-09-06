@@ -5,7 +5,7 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.0.1
+# Version: 1.1.0
 # Git: https://github.com/newsnowlabs/bundelf
 
 # make-bundelf-bundle.sh is used to prepare and package ELF binaries and their 
@@ -98,8 +98,7 @@ verify() {
 }
 
 copy_binaries() {
-  # Copy any binaries we require to the install location.
-  # Write their paths to cmd-elf-bin.
+  # Copy any binaries we require to the install location, outputing their new paths.
 
   if [ -n "$BUNDELF_MERGE_BINDIRS" ]; then
     mkdir -p $BUNDELF_CODE_PATH/bin
@@ -127,51 +126,34 @@ copy_binaries() {
 scan_extra_libs() {
   for p in "$@"
   do
-    find "$p" ! -type d | while read lib
-      do
-        local f=$(basename $lib)
-        echo "$f $lib"
-      done
+    find "$p" ! -type d
   done
 }
 
-# Using ldd, generate list of resolved library filepaths for each ELF binary and library,
-# logging first argument (to be used as $lib) and second argument (to be used as $dest).
-# e.g.
-# libaio.so.1  /usr/lib/libaio.so.1
-# libblkid.so.1  /lib/libblkid.so.1
+# Using ldd, generate list of resolved library filepaths for each ELF binary and library, e.g.
+# /usr/lib/libaio.so.1
+# /lib/libblkid.so.1
 find_lib_deps() {
-  cat "$@" | sort -u | xargs -P $(nproc) -I '{}' ldd '{}' 2>/dev/null | sed -nr 's/^\s*(.*)=>\s*(.*?)\s.*$/\1 \2/p' | sort -u
+  cat "$@" | sort -u | xargs -P $(nproc) -I '{}' ldd '{}' 2>/dev/null | sed -nr 's/^\s*(.*)=>\s*(.*?)\s.*$/\2/p' | sort -u
 }
 
 copy_libs() {
   mkdir -p $BUNDELF_CODE_PATH
 
-  # For each resolved library filepath:
-  # - Copy $dest to the install location.
-  # - If $dest is a symlink, copy the symlink to the install location too.
-  # - If needed, add a symlink from $lib to $dest.
+  # For each resolved library filepath, copy $dest to the install location.
   #
   # N.B. These steps are all needed to ensure the Alpine dynamic linker can resolve library filepaths as required.
   #      For more, see https://www.musl-libc.org/doc/1.0.0/manual.html
   #
-  sort -u "$@" | while read lib dest
+  sort -u "$@" | while read dest
   do
     # Copy $dest; and if $dest is a symlink, copy its target.
     # This could conceivably result in duplicates if multiple symlinks point to the same target,
     # but is much simpler than trying to copy symlinks and targets separately.
     cp -a --parents -L $dest $BUNDELF_CODE_PATH
 
-    # If needed, add a symlink from $lib to $(basename $dest)
-    if [ "$(basename $dest)" != "$lib" ]; then
-      if cd $BUNDELF_CODE_PATH/$(dirname $dest); then
-        ln -s $(basename $dest) $lib
-        cd - >/dev/null
-      fi
-    fi
-
     if [ "$dest" != "$LD_PATH" ]; then
-        echo "$BUNDELF_CODE_PATH$dest"
+      echo "$BUNDELF_CODE_PATH$dest"
     fi
   done
 }
@@ -341,8 +323,8 @@ get_dynamics_noninterpretable() {
 
 write_digest() {
   # Prepare full and unique list of ELF binaries and libs for reference purposes and for checking
-  sort -u $TMP/cmd-elf-bin >$BUNDELF_CODE_PATH/.binelfs
-  sort -u $TMP/cmd-elf-lib >$BUNDELF_CODE_PATH/.libelfs
+  sort -u $TMP/bins-copied >$BUNDELF_CODE_PATH/.binelfs
+  sort -u $TMP/libs-copied >$BUNDELF_CODE_PATH/.libelfs
 }
 
 init() {
@@ -358,46 +340,63 @@ init() {
 
   # Initialise
   mkdir -p "$TMP"
-  >$TMP/cmd-elf-bin
-  >$TMP/cmd-elf-lib
-  >$TMP/libs-tuples
-  >$TMP/libs-extra-tuples
+  >$TMP/bins-copied
+  >$TMP/libs-copied
+  >$TMP/libs
+  >$TMP/libs-extra
+  >$TMP/libs-deps
+  >$TMP/libs-new
   >$TMP/scanned-dynamics
   >$TMP/system-lib-paths
 }
 
 all() {
-  # Copy elf binaries to BUNDELF_CODE_PATH and generate 'cmd-elf-bin' list of ELF binaries
-  copy_binaries $BUNDELF_BINARIES >>$TMP/cmd-elf-bin
+  # Copy elf binaries to BUNDELF_CODE_PATH and generate 'bins-copied' list of ELF binaries
+  copy_binaries $BUNDELF_BINARIES >>$TMP/bins-copied
 
   # Scan for additional dynamic binaries and libs
   copy_and_scan_for_dynamics $BUNDELF_DYNAMIC_PATHS >>$TMP/scanned-dynamics
 
-  # Add the intepretable dynamics to 'cmd-elf-bin'
-  get_dynamics_interpretable $TMP/scanned-dynamics >>$TMP/cmd-elf-bin
+  # Add the intepretable dynamics to 'bins-copied'
+  get_dynamics_interpretable $TMP/scanned-dynamics >>$TMP/bins-copied
 
   # Add the non-intepretable dynamics to 'libs'
-  get_dynamics_noninterpretable $TMP/scanned-dynamics >>$TMP/cmd-elf-lib
+  get_dynamics_noninterpretable $TMP/scanned-dynamics >>$TMP/libs-copied
 
-  # Find library dependencies of these dynamic binaries and libs; write tuples to 'libs'
-  find_lib_deps $TMP/cmd-elf-bin $TMP/cmd-elf-lib >>$TMP/libs-tuples
+  # Scan for extra libraries not formally declared as dependencies
+  scan_extra_libs $BUNDELF_EXTRA_LIBS >>$TMP/libs-extra
 
-  # Scan for extra libraries not formally declared as dependencies, and append tuples to 'libs'
-  scan_extra_libs $BUNDELF_EXTRA_LIBS >>$TMP/libs-extra-tuples
+  # Generate unique list of dynamic binaries and libs
+  sort -u $TMP/bins-copied $TMP/libs-copied $TMP/libs-extra >>$TMP/libs
 
-  # Copy the library tuples from 'libs' to BUNDELF_CODE_PATH and append to 'cmd-elf-lib'
-  copy_libs $TMP/libs-tuples $TMP/libs-extra-tuples >>$TMP/cmd-elf-lib
+  # Iteratively find all library dependencies of libraries in 'libs', until no new libraries are found  
+  while true
+  do
+    # Find library dependencies of libraries in 'libs'; write to 'libs-new'
+    find_lib_deps $TMP/libs >>$TMP/libs-deps
 
-  # Patch interpreter on all ELF binaries in 'cmd-elf-bin'
-  patch_binaries_interpreter $TMP/cmd-elf-bin
+    sort -u $TMP/libs $TMP/libs-deps >$TMP/libs-new
+
+    if diff -q $TMP/libs $TMP/libs-new >/dev/null 2>&1; then
+      break
+    fi
+
+    mv $TMP/libs-new $TMP/libs
+  done
+
+  # Copy libraries from 'libs' to BUNDELF_CODE_PATH and itemise new copied paths (overwriting previous incomplete 'libs-copied')
+  copy_libs $TMP/libs >$TMP/libs-copied
+
+  # Patch interpreter on all ELF binaries in 'bins-copied'
+  patch_binaries_interpreter $TMP/bins-copied
 
   # Generate non-unique list of system library paths:
-  generate_system_lib_paths $TMP/cmd-elf-lib >>$TMP/system-lib-paths
+  generate_system_lib_paths $TMP/libs-copied >>$TMP/system-lib-paths
   generate_extra_system_lib_paths $BUNDELF_EXTRA_SYSTEM_LIB_PATHS >>$TMP/system-lib-paths
 
-  # Patch RPATH on all binaries in 'cmd-elf-bin' and libs in 'cmd-elf-lib'
-  # TODO: This duplicates running patch_binaries_interpreter on all 'cmd-elf-bin' files, in order that it can be run in relaxed mode on 'cmd-elf-lib'
-  patch_binaries_and_libs_rpath $TMP/cmd-elf-bin $TMP/cmd-elf-lib
+  # Patch RPATH on all binaries in 'bins-copied' and libs in 'libs-copied'
+  # TODO: This duplicates running patch_binaries_interpreter on all 'bins-copied' files, in order that it can be run in relaxed mode on 'libs'
+  patch_binaries_and_libs_rpath $TMP/bins-copied $TMP/libs-copied
 
   # Write a summary of binaries and libraries to BUNDELF_CODE_PATH
   write_digest
