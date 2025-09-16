@@ -145,7 +145,7 @@ copy_libs() {
   # N.B. These steps are all needed to ensure the Alpine dynamic linker can resolve library filepaths as required.
   #      For more, see https://www.musl-libc.org/doc/1.0.0/manual.html
   #
-  sort -u "$@" | while read dest
+  grep -v "^$BUNDELF_CODE_PATH" "$@" | sort -u | while read dest
   do
     # Copy $dest; and if $dest is a symlink, copy its target.
     # This could conceivably result in duplicates if multiple symlinks point to the same target,
