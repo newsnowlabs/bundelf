@@ -64,11 +64,28 @@ append() {
   while read line; do echo "${line}${1}"; done
 }
 
-# Check that all dynamic library dependencies are correctly being resolved to versions stored within BUNDELF_CODE_PATH.
-# Prints any 
-_verify() {
+_verify_interpreter_paths() {
+  # Verify interpreter path is correctly set in all ELF binaries
+  # Returns 0 if all OK, 1 if any problems found
   local status=0
+  echo "Verifying interpreter paths..." >&2
 
+  while IFS= read -r bin; do
+    echo -n "- interp: $bin ... " >&2
+    local interpreter=$(patchelf --print-interpreter "$bin" 2>/dev/null)
+    if [ "$interpreter" != "$BUNDELF_EXEC_PATH$LD_PATH" ]; then
+      echo "BAD (interpreter: $interpreter)" >&2
+      status=1
+    else
+      echo "GOOD" >&2
+    fi
+  done < "$BUNDELF_CODE_PATH/.binelfs"
+  return $status
+}
+
+_verify_rpath_settings() {
+  # Verify RPATH settings match expected patterns for relative/absolute mode
+  # Returns 0 if all OK, 1 if any problems found
   # Deduce BUNDELF_CODE_PATH from elf-patcher.sh execution path, if none provided (useful when called with --verify within an alternative environment).
   [ -z $BUNDELF_CODE_PATH ] && BUNDELF_CODE_PATH=$(realpath $(dirname $0)/..)
 
@@ -76,29 +93,94 @@ _verify() {
   local BUNDELF_EXEC_PATH_REGEX=$(escape_regex "$BUNDELF_EXEC_PATH")
   local LD_BIN_REGEX=$(escape_regex "$LD_BIN")
 
-  # Now check the ELF files
-  for lib in $(cat $BUNDELF_CODE_PATH/.binelfs $BUNDELF_CODE_PATH/.libelfs)
-  do
-    echo -n "Checking: $lib ... " >&2
+  local status=0
+  echo "Verifying RPATH settings..." >&2
+
+  while IFS= read -r file; do
+    echo -n "- RPATH: $file ... " >&2
+    local rpath=$(patchelf --print-rpath "$file" 2>/dev/null)
+
+    if [ "$BUNDELF_LIBPATH_TYPE" = "absolute" ]; then
+      # For absolute mode, all RPATHs should start with BUNDELF_CODE_PATH
+      if ! echo "$rpath" | grep -q "^$BUNDELF_CODE_PATH"; then
+        echo "BAD (expected absolute path)" >&2
+        status=1
+      else
+        echo "GOOD" >&2
+      fi
+    else
+      # For relative mode, all RPATHs should use $ORIGIN
+      if ! echo "$rpath" | grep -q '^\$ORIGIN'; then
+        echo "BAD (expected \$ORIGIN)" >&2
+        status=1
+      else
+        echo "GOOD" >&2
+      fi
+    fi
+  done < <(cat "$BUNDELF_CODE_PATH/.binelfs" "$BUNDELF_CODE_PATH/.libelfs")
+  return $status
+}
+
+_verify_symlinks() {
+  # Check for broken symlinks within the bundle
+  # Returns 0 if all OK, 1 if any problems found
+  local status=0
+  echo "Verifying symlinks..." >&2
+
+  while IFS= read -r link; do
+    echo -n "- symlink: $link ... " >&2
+    if ! [ -e "$link" ]; then
+      echo "BAD (broken link)" >&2
+      status=1
+    else
+      echo "GOOD" >&2
+    fi
+  done < <(find "$BUNDELF_CODE_PATH" -type l)
+
+  return $status
+}
+
+_verify_library_resolution() {
+  # Check that all dynamic library dependencies are correctly being resolved to versions stored within BUNDELF_CODE_PATH.
+  # Returns 0 if all OK, 1 if any problems found
+  local status=0
+  echo "Verifying library resolution..." >&2
+
+  local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
+  local BUNDELF_EXEC_PATH_REGEX=$(escape_regex "$BUNDELF_EXEC_PATH")
+  local LD_BIN_REGEX=$(escape_regex "$LD_BIN")
+
+  while IFS= read -r lib; do
+    echo -n "- lib: $lib ... " >&2
     $BUNDELF_CODE_PATH$LD_PATH --list $lib 2>/dev/null | sed -nr '/=>/!d; s/^\s*(\S+)\s*=>\s*(.*?)(\s*\(0x[0-9a-f]+\))?$/- \2 \1/;/^.+$/p;' | egrep -v -- "^- ($BUNDELF_CODE_PATH_REGEX/|$BUNDELF_EXEC_PATH_REGEX/.*/$LD_BIN_REGEX)"
-  
-    # If any libraries do not match the expected pattern, grep returns true
+    
     if [ $? -eq 0 ]; then
       status=1
-      echo "BAD"
+      echo "BAD" >&2
     else
-      echo "GOOD"
+      echo "GOOD" >&2
     fi
-
     sleep 0.01
-  done
-  
+  done < <(cat "$BUNDELF_CODE_PATH/.binelfs" "$BUNDELF_CODE_PATH/.libelfs")
   return $status
 }
 
 verify() {
-  _verify
-  exit $?
+  local final_status=0
+
+  # Deduce BUNDELF_CODE_PATH from elf-patcher.sh execution path, if none provided (useful when called with --verify within an alternative environment).
+  [ -z $BUNDELF_CODE_PATH ] && BUNDELF_CODE_PATH=$(realpath $(dirname $0)/..)
+
+  # Fast verifications
+  _verify_interpreter_paths || final_status=1
+  _verify_symlinks || final_status=1
+  _verify_rpath_settings || final_status=1
+  _verify_library_resolution || final_status=1
+
+  if [ $final_status -eq 0 ]; then
+    echo "All verifications passed successfully." >&2
+  fi
+  exit $final_status
 }
 
 copy_binaries() {
@@ -158,7 +240,8 @@ copy_libs() {
 
     # If $file is a symlink, then copy its target too, as the target might not otherwise be copied.
     if [ -L "$file" ]; then
-      local target=$(readlink -f "$file")
+      # local target=$(readlink -f "$file")
+      local target=$(dirname "$file")/$(readlink "$file")
       cp -a --parents $target $BUNDELF_CODE_PATH
     fi
 
