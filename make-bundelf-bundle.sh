@@ -5,7 +5,7 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.1.0
+# Version: 1.1.1
 # Git: https://github.com/newsnowlabs/bundelf
 
 # make-bundelf-bundle.sh is used to prepare and package ELF binaries and their 
@@ -72,11 +72,15 @@ _verify() {
   # Deduce BUNDELF_CODE_PATH from elf-patcher.sh execution path, if none provided (useful when called with --verify within an alternative environment).
   [ -z $BUNDELF_CODE_PATH ] && BUNDELF_CODE_PATH=$(realpath $(dirname $0)/..)
 
+  local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
+  local BUNDELF_EXEC_PATH_REGEX=$(escape_regex "$BUNDELF_EXEC_PATH")
+  local LD_BIN_REGEX=$(escape_regex "$LD_BIN")
+
   # Now check the ELF files
   for lib in $(cat $BUNDELF_CODE_PATH/.binelfs $BUNDELF_CODE_PATH/.libelfs)
   do
     echo -n "Checking: $lib ... " >&2
-    $BUNDELF_CODE_PATH$LD_PATH --list $lib 2>/dev/null | sed -nr '/=>/!d; s/^\s*(\S+)\s*=>\s*(.*?)(\s*\(0x[0-9a-f]+\))?$/- \2 \1/;/^.+$/p;' | egrep -v "^- ($BUNDELF_CODE_PATH/|$BUNDELF_EXEC_PATH/.*/$LD_BIN)"
+    $BUNDELF_CODE_PATH$LD_PATH --list $lib 2>/dev/null | sed -nr '/=>/!d; s/^\s*(\S+)\s*=>\s*(.*?)(\s*\(0x[0-9a-f]+\))?$/- \2 \1/;/^.+$/p;' | egrep -v -- "^- ($BUNDELF_CODE_PATH_REGEX/|$BUNDELF_EXEC_PATH_REGEX/.*/$LD_BIN_REGEX)"
   
     # If any libraries do not match the expected pattern, grep returns true
     if [ $? -eq 0 ]; then
@@ -113,7 +117,7 @@ copy_binaries() {
 
     if [ -n "$file" ]; then
       if [ -z "$BUNDELF_MERGE_BINDIRS" ]; then
-        tar cv $file 2>/dev/null | tar x -C $BUNDELF_CODE_PATH/
+        cp -a --parents $file $BUNDELF_CODE_PATH
         echo "$BUNDELF_CODE_PATH$file"
       else
         cp -p $file $BUNDELF_CODE_PATH/bin/
@@ -140,20 +144,26 @@ find_lib_deps() {
 copy_libs() {
   mkdir -p $BUNDELF_CODE_PATH
 
-  # For each resolved library filepath, copy $dest to the install location.
+  # For each resolved library filepath, copy $file to the install location.
   #
   # N.B. These steps are all needed to ensure the Alpine dynamic linker can resolve library filepaths as required.
   #      For more, see https://www.musl-libc.org/doc/1.0.0/manual.html
   #
-  grep -v "^$BUNDELF_CODE_PATH" "$@" | sort -u | while read dest
+  grep -v "^$BUNDELF_CODE_PATH" "$@" | sort -u | while read file
   do
-    # Copy $dest; and if $dest is a symlink, copy its target.
-    # This could conceivably result in duplicates if multiple symlinks point to the same target,
-    # but is much simpler than trying to copy symlinks and targets separately.
-    cp -a --parents -L $dest $BUNDELF_CODE_PATH
+    # Copy $file; and if $file is a symlink, also copy its target.
+    # This could  result in duplicate copies if multiple symlinks point to the same target,
+    # but has the advantage of simplicity.
+    cp -a --parents $file $BUNDELF_CODE_PATH
 
-    if [ "$dest" != "$LD_PATH" ]; then
-      echo "$BUNDELF_CODE_PATH$dest"
+    # If $file is a symlink, then copy its target too, as the target might not otherwise be copied.
+    if [ -L "$file" ]; then
+      local target=$(readlink -f "$file")
+      cp -a --parents $target $BUNDELF_CODE_PATH
+    fi
+
+    if [ "$file" != "$LD_PATH" ]; then
+      echo "$BUNDELF_CODE_PATH$file"
     fi
   done
 }
@@ -169,20 +179,46 @@ patch_binary() {
   return 1
 }
 
-# Function to replace a hard-linked file with a non-hard-linked copy
-replace_hard_link() {
+# # Function to replace a hard-linked file with a non-hard-linked copy
+# replace_hard_link() {
+#     local file="$1"
+#
+#     # Check if the file exists
+#     if [ ! -e "$file" ]; then
+#         echo "replace_hard_link: file '$file' does not exist."
+#         exit 1
+#     fi
+#
+#     # Get the number of hard links to the file
+#     local link_count=$(stat -c %h "$file")
+#
+#     # If the link count is greater than 1, the file is a hard link
+#     if [ "$link_count" -gt 1 ]; then
+#         # Create a temporary copy of the file, and overwrite the original file with the non-hard-linked copy
+#         local tmp_file=$(mktemp)
+#         cp -dp "$file" "$tmp_file" && mv "$tmp_file" "$file"
+#     fi
+#
+#     return 0
+# }
+
+# Function to replace links with direct copies when using relative RPATHs
+replace_link() {
     local file="$1"
+    local tmp_file
     
-    # Check if the file exists
-    if [ ! -e "$file" ]; then
-        echo "replace_hard_link: file '$file' does not exist."
-        exit 1
+    [ "$BUNDELF_LIBPATH_TYPE" = "relative" ] || return 0
+    
+    # Handle symlinks
+    if [ -L "$file" ]; then
+        tmp_file=$(mktemp)
+        cp -L "$file" "$tmp_file" && mv "$tmp_file" "$file"
+        return 0
     fi
 
-    # Get the number of hard links to the file
-    local link_count=$(stat -c %h "$file")
-
+    # Handle hard links
     # If the link count is greater than 1, the file is a hard link
+    local link_count=$(stat -c %h "$file")
     if [ "$link_count" -gt 1 ]; then
         # Create a temporary copy of the file, and overwrite the original file with the non-hard-linked copy
         local tmp_file=$(mktemp)
@@ -207,21 +243,21 @@ generate_extra_system_lib_paths() {
   done 
 }
 
+escape_regex() {
+  local s=$1 d=${2:-/}
+  printf '%s' "$s" | sed -e "s/[][(){}.^\$*+?|\\\\$d]/\\\\&/g"
+}
+
 generate_system_lib_paths() {
   # Generate a list of system library paths
   # - This will be used to set the RPATH for all binaries and libraries to an absolute or relative path.
-
-  # This list is generated by:
-  # - Running the dynamic linker with --list-diagnostics
-  # - Extracting the system_dirs path from the output
-  # - Removing any trailing slashes
-  # $BUNDELF_CODE_PATH$LD_PATH --list-diagnostics | grep ^path.system_dirs | sed -r 's|^.*="([^"]+)/?"$|\1|; s|/$||' | sort -u
-
   # This list is generated by:
   # - Extracting the path to each library, relative to $BUNDELF_CODE_PATH; add leading '/' if missing.
+  local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
+
   cat "$@" | \
     grep -E '\.so(\.[0-9]+)*$' | \
-    sed -r "s|^$BUNDELF_CODE_PATH||; s|/[^/]+$||; s|^[^/]|/|;" | \
+    sed -r "s|^$BUNDELF_CODE_PATH_REGEX||; s|/[^/]+$||; s|^[^/]|/|;" | \
     grep -E '^(/usr|/lib)(/|$)' | \
     sort -u
 }
@@ -232,6 +268,7 @@ generate_unique_rpath() {
   local abs_syspaths  
   for s in $(sort -u "$@")
   do
+    # Append each system path, prefixed with $prefix, and suffixed with a colon
     abs_syspaths="$abs_syspaths$(echo "$prefix${s}:")"
   done
 
@@ -251,6 +288,11 @@ patch_binaries_and_libs_rpath() {
     rpath_template=$(generate_unique_rpath "\$ORIGIN" "$TMP/system-lib-paths")
   fi
 
+  echo "BUNDELF_CODE_PATH: $BUNDELF_CODE_PATH" >>$TMP/patchelf.log
+  echo "RPATH template: $rpath_template" >>$TMP/patchelf.log
+
+  local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
+
   for lib in $(sort -u "$@")
   do
 
@@ -264,11 +306,11 @@ patch_binaries_and_libs_rpath() {
       fi
 
     else
-      # If $lib is hardlinked in different parts of the file hierarchy, then setting a relative RPATH on one file would break the correct RPATH set on another.
+      # If $lib is linked in different parts of the file hierarchy, then setting a relative RPATH on one file would break the correct RPATH set on another.
       # To prevent this, we un-hardlink any hardlinked files before we patch them.
-      replace_hard_link "$lib"
+      replace_link "$lib"
 
-      p=$(dirname "$lib" | sed -r "s|^$BUNDELF_CODE_PATH[/]+||; s|[^/]+|..|g")
+      p=$(dirname "$lib" | sed -r "s|^$BUNDELF_CODE_PATH_REGEX[/]+||; s|[^/]+|..|g")
       # rpath="\$ORIGIN/$p/lib:\$ORIGIN/$p/usr/lib:\$ORIGIN/$p/usr/lib/xtables"
       rpath="$(echo "$rpath_template" | sed "s|\$ORIGIN|\$ORIGIN/$p|g")"
 
@@ -403,7 +445,7 @@ all() {
 
   # Copy LD and and create copnvenience symlink it to ld
   cp --parents $LD_PATH $BUNDELF_CODE_PATH
-  ln -s $(echo $LD_PATH | sed -r 's|^/lib/|./|') $BUNDELF_CODE_PATH/lib/ld
+  ln -sf $(echo $LD_PATH | sed -r 's|^/lib/|./|') $BUNDELF_CODE_PATH/lib/ld
 }
 
 # Run with --verify from within any distribution, to check that all dynamic library dependencies
