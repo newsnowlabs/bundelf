@@ -86,12 +86,8 @@ _verify_interpreter_paths() {
 _verify_rpath_settings() {
   # Verify RPATH settings match expected patterns for relative/absolute mode
   # Returns 0 if all OK, 1 if any problems found
-  # Deduce BUNDELF_CODE_PATH from elf-patcher.sh execution path, if none provided (useful when called with --verify within an alternative environment).
-  [ -z $BUNDELF_CODE_PATH ] && BUNDELF_CODE_PATH=$(realpath $(dirname $0)/..)
 
   local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
-  local BUNDELF_EXEC_PATH_REGEX=$(escape_regex "$BUNDELF_EXEC_PATH")
-  local LD_BIN_REGEX=$(escape_regex "$LD_BIN")
 
   local status=0
   echo "Verifying RPATH settings..." >&2
@@ -101,16 +97,16 @@ _verify_rpath_settings() {
     local rpath=$(patchelf --print-rpath "$file" 2>/dev/null)
 
     if [ "$BUNDELF_LIBPATH_TYPE" = "absolute" ]; then
-      # For absolute mode, all RPATHs should start with BUNDELF_CODE_PATH
-      if ! echo "$rpath" | grep -q "^$BUNDELF_CODE_PATH"; then
+      # For absolute mode, all RPATHs should start with BUNDELF_CODE_PATH (or be empty, should no dynamic libraries be referenced by any bundled binaries)
+      if ! echo "$rpath" | grep -qE "^($BUNDELF_CODE_PATH_REGEX|$)"; then
         echo "BAD (expected absolute path)" >&2
         status=1
       else
         echo "GOOD" >&2
       fi
     else
-      # For relative mode, all RPATHs should use $ORIGIN
-      if ! echo "$rpath" | grep -q '^\$ORIGIN'; then
+      # For relative mode, all RPATHs should use $ORIGIN (or be empty, should no dynamic libraries be referenced by any bundled binaries)
+      if ! echo "$rpath" | grep -qE '^(\$ORIGIN|$)'; then
         echo "BAD (expected \$ORIGIN)" >&2
         status=1
       else
@@ -168,7 +164,7 @@ _verify_library_resolution() {
 verify() {
   local final_status=0
 
-  # Deduce BUNDELF_CODE_PATH from elf-patcher.sh execution path, if none provided (useful when called with --verify within an alternative environment).
+  # Deduce BUNDELF_CODE_PATH from this script's execution path, when needed (useful when called with --verify within an alternative environment).
   [ -z $BUNDELF_CODE_PATH ] && BUNDELF_CODE_PATH=$(realpath $(dirname $0)/..)
 
   # Fast verifications
