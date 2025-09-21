@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # BundELF - ELF binary and dynamic library patcher/bundler for making portable/relocatable executables
 # ----------------------------------------------------------------------------------------------------
