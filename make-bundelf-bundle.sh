@@ -374,7 +374,7 @@ patch_binaries_and_libs_rpath() {
   fi
 
   echo "BUNDELF_CODE_PATH: $BUNDELF_CODE_PATH" >>$TMP/patchelf.log
-  echo "RPATH template: $rpath_template" >>$TMP/patchelf.log
+  echo "RPATH template: ${rpath_template@Q}" >>$TMP/patchelf.log
 
   local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
 
@@ -413,12 +413,12 @@ patch_binaries_and_libs_rpath() {
       fi
     fi
 
-    echo patchelf --force-rpath --set-rpath "$rpath" "$lib" >>$TMP/patchelf.log
+    echo patchelf --force-rpath --set-rpath ${rpath@Q} "$lib" >>$TMP/patchelf.log
     patchelf --force-rpath --set-rpath \
       "$rpath" \
       "$lib" >>$TMP/patchelf.log 2>&1 || exit 1
 
-    # Fail silently if patchelf fails to set the interpreter: this is a catch-all for add libraries like /usr/lib/libcap.so.2
+    # Fail silently if patchelf fails to set the interpreter: this is a catch-all for libraries like /usr/lib/libcap.so.2
     # which strangely have an interpreter set.
     patch_binary "$lib"
 
