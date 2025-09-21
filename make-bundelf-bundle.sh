@@ -522,7 +522,6 @@ all() {
   generate_extra_system_lib_paths $BUNDELF_EXTRA_SYSTEM_LIB_PATHS >>$TMP/system-lib-paths
 
   # Patch RPATH on all binaries in 'bins-copied' and libs in 'libs-copied'
-  # TODO: This duplicates running patch_binaries_interpreter on all 'bins-copied' files, in order that it can be run in relaxed mode on 'libs'
   patch_binaries_and_libs_rpath $TMP/bins-copied $TMP/libs-copied
 
   # Write a summary of binaries and libraries to BUNDELF_CODE_PATH
