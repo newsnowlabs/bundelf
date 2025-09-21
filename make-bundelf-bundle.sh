@@ -222,12 +222,14 @@ find_lib_deps() {
 copy_libs() {
   mkdir -p $BUNDELF_CODE_PATH
 
+  local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
+
   # For each resolved library filepath, copy $file to the install location.
   #
   # N.B. These steps are all needed to ensure the Alpine dynamic linker can resolve library filepaths as required.
   #      For more, see https://www.musl-libc.org/doc/1.0.0/manual.html
   #
-  grep -v "^$BUNDELF_CODE_PATH" "$@" | sort -u | while read file
+  grep -v "^$BUNDELF_CODE_PATH_REGEX" "$@" | sort -u | while read file
   do
     # Copy $file; and if $file is a symlink, also copy its target.
     # This could  result in duplicate copies if multiple symlinks point to the same target,
