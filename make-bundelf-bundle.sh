@@ -258,50 +258,56 @@ patch_binary() {
   return 1
 }
 
-# # Function to replace a hard-linked file with a non-hard-linked copy
-# replace_hard_link() {
-#     local file="$1"
-#
-#     # Check if the file exists
-#     if [ ! -e "$file" ]; then
-#         echo "replace_hard_link: file '$file' does not exist."
-#         exit 1
-#     fi
-#
-#     # Get the number of hard links to the file
-#     local link_count=$(stat -c %h "$file")
-#
-#     # If the link count is greater than 1, the file is a hard link
-#     if [ "$link_count" -gt 1 ]; then
-#         # Create a temporary copy of the file, and overwrite the original file with the non-hard-linked copy
-#         local tmp_file=$(mktemp)
-#         cp -dp "$file" "$tmp_file" && mv "$tmp_file" "$file"
-#     fi
-#
-#     return 0
-# }
-
-# Function to replace links with direct copies when using relative RPATHs
+# Function to replace links with direct copies when using relative RPATHs.
+# Only replaces links when source and target are in different directories,
+# and thus need different RPATHs.
 replace_link() {
     local file="$1"
     local tmp_file
     
     [ "$BUNDELF_LIBPATH_TYPE" = "relative" ] || return 0
     
-    # Handle symlinks
+  # Handle symlinks - only replace if target is in a different directory
     if [ -L "$file" ]; then
+    local link_target=$(readlink "$file")
+    local file_dir=$(dirname "$(realpath "$file")")
+      
+    if [ "${link_target#/}" = "$link_target" ]; then
+        # Relative symlink: Resolve target relative to symlink location
+        local target_full="$(cd "$(dirname "$file")" && realpath -m "$link_target")"
+        local target_dir=$(dirname "$target_full")
+    else
+        # Absolute symlink: Already have full path
+        local target_dir=$(dirname "$(realpath "$link_target")")
+    fi
+      
+    if [ "$file_dir" != "$target_dir" ]; then
         tmp_file=$(mktemp)
         cp -L "$file" "$tmp_file" && mv "$tmp_file" "$file"
+    fi
         return 0
     fi
 
-    # Handle hard links
-    # If the link count is greater than 1, the file is a hard link
+  # Handle hard links - only replace if any hard link is in a different directory
     local link_count=$(stat -c %h "$file")
     if [ "$link_count" -gt 1 ]; then
-        # Create a temporary copy of the file, and overwrite the original file with the non-hard-linked copy
-        local tmp_file=$(mktemp)
+    local file_dir=$(dirname "$file")
+    local needs_replacement=0
+    
+    # Find all hard links to this inode and check their directories
+    local inode=$(stat -c %i "$file")
+    while IFS= read -r linked_file; do
+      local linked_dir=$(dirname "$linked_file")
+      if [ "$linked_dir" != "$file_dir" ]; then
+        needs_replacement=1
+        break
+      fi
+    done < <(find "$BUNDELF_CODE_PATH" -samefile "$file")
+
+    if [ "$needs_replacement" -eq 1 ]; then
+        tmp_file=$(mktemp)
         cp -dp "$file" "$tmp_file" && mv "$tmp_file" "$file"
+    fi
     fi
 
     return 0
