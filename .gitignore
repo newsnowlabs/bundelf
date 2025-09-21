@@ -1,0 +1,28 @@
+# Project-wide .gitignore
+
+# Editors/temporary files
+*~
+*.swp
+*.swo
+*.tmp
+*.bak
+*.orig
+*.rej
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE/editor settings
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Caches and temp
+.cache/
+tmp/
+
+# Test artifacts
+tests/test-results/*
