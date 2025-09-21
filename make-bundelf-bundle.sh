@@ -232,7 +232,7 @@ copy_libs() {
   grep -v "^$BUNDELF_CODE_PATH_REGEX" "$@" | sort -u | while read file
   do
     # Copy $file; and if $file is a symlink, also copy its target.
-    # This could  result in duplicate copies if multiple symlinks point to the same target,
+    # This could  result in duplicate copy operations if multiple symlinks point to the same target,
     # but has the advantage of simplicity.
     cp -a --parents $file $BUNDELF_CODE_PATH
 
