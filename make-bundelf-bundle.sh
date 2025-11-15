@@ -5,7 +5,7 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.1.1
+# Version: 1.1.2
 # Git: https://github.com/newsnowlabs/bundelf
 
 # make-bundelf-bundle.sh is used to prepare and package ELF binaries and their 
@@ -195,10 +195,10 @@ copy_binaries() {
 
     if [ -n "$file" ]; then
       if [ -z "$BUNDELF_MERGE_BINDIRS" ]; then
-        cp -a --parents $file $BUNDELF_CODE_PATH
+        cp -a --dereference --parents $file $BUNDELF_CODE_PATH
         echo "$BUNDELF_CODE_PATH$file"
       else
-        cp -p $file $BUNDELF_CODE_PATH/bin/
+        cp -p --dereference $file $BUNDELF_CODE_PATH/bin/
         echo "$BUNDELF_CODE_PATH/bin/$basename"
       fi
     fi
@@ -238,7 +238,7 @@ copy_libs() {
 
     # If $file is a symlink, then copy its target too, as the target might not otherwise be copied.
     if [ -L "$file" ]; then
-      # local target=$(readlink -f "$file")
+      # local target=$(realpath -m "$(dirname "$file")/$(readlink "$file")")
       local target=$(dirname "$file")/$(readlink "$file")
       cp -a --parents $target $BUNDELF_CODE_PATH
     fi
@@ -264,13 +264,13 @@ patch_binary() {
 # Only replaces links when source and target are in different directories,
 # and thus need different RPATHs.
 replace_link() {
-    local file="$1"
-    local tmp_file
-    
-    [ "$BUNDELF_LIBPATH_TYPE" = "relative" ] || return 0
-    
+  local file="$1"
+  local tmp_file
+  
+  [ "$BUNDELF_LIBPATH_TYPE" = "relative" ] || return 0
+  
   # Handle symlinks - only replace if target is in a different directory
-    if [ -L "$file" ]; then
+  if [ -L "$file" ]; then
     local link_target=$(readlink "$file")
     local file_dir=$(dirname "$(realpath "$file")")
       
@@ -287,12 +287,12 @@ replace_link() {
         tmp_file=$(mktemp)
         cp -L "$file" "$tmp_file" && mv "$tmp_file" "$file"
     fi
-        return 0
-    fi
+    return 0
+  fi
 
   # Handle hard links - only replace if any hard link is in a different directory
-    local link_count=$(stat -c %h "$file")
-    if [ "$link_count" -gt 1 ]; then
+  local link_count=$(stat -c %h "$file")
+  if [ "$link_count" -gt 1 ]; then
     local file_dir=$(dirname "$file")
     local needs_replacement=0
     
@@ -310,9 +310,9 @@ replace_link() {
         tmp_file=$(mktemp)
         cp -dp "$file" "$tmp_file" && mv "$tmp_file" "$file"
     fi
-    fi
+  fi
 
-    return 0
+  return 0
 }
 
 patch_binaries_interpreter() {
@@ -436,6 +436,9 @@ copy_and_scan_for_dynamics() {
 
   for q in "$@"
   do
+    # Skip non-existent paths
+    [ -d "$q" ] || continue
+
     tar cv "$q" 2>/dev/null | tar x -C $BUNDELF_CODE_PATH/
 
     find "$q" -type f ! -name '*.o' -print0 | xargs -0 -P $(nproc) -I '{}' hexdump -n 4 -e '4/1 "%2x" " {}\n"' {} | sed '/^7f454c46/!d; s/^7f454c46 //' | xargs -P $(nproc) file | grep dynamically
