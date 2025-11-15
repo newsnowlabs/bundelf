@@ -5,7 +5,7 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.1.2
+# Version: 1.1.3
 # Git: https://github.com/newsnowlabs/bundelf
 
 # make-bundelf-bundle.sh is used to prepare and package ELF binaries and their 
@@ -263,7 +263,7 @@ patch_binary() {
 # Function to replace links with direct copies when using relative RPATHs.
 # Only replaces links when source and target are in different directories,
 # and thus need different RPATHs.
-replace_link() {
+replace_link_new() {
   local file="$1"
   local tmp_file
   
@@ -313,6 +313,32 @@ replace_link() {
   fi
 
   return 0
+}
+
+# Function to replace links with direct copies when using relative RPATHs
+replace_link() {
+    local file="$1"
+    local tmp_file
+    
+    [ "$BUNDELF_LIBPATH_TYPE" = "relative" ] || return 0
+    
+    # Handle symlinks
+    if [ -L "$file" ]; then
+        tmp_file=$(mktemp)
+        cp -L "$file" "$tmp_file" && mv "$tmp_file" "$file"
+        return 0
+    fi
+
+    # Handle hard links
+    # If the link count is greater than 1, the file is a hard link
+    local link_count=$(stat -c %h "$file")
+    if [ "$link_count" -gt 1 ]; then
+        # Create a temporary copy of the file, and overwrite the original file with the non-hard-linked copy
+        local tmp_file=$(mktemp)
+        cp -dp "$file" "$tmp_file" && mv "$tmp_file" "$file"
+    fi
+
+    return 0
 }
 
 patch_binaries_interpreter() {
