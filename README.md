@@ -1,15 +1,19 @@
-# BundELF - all the benefits of statically-compiled binaries, without the faff
+# BundELF - all the benefits of statically-linked binaries, without the faff
 
 ## What is BundELF?
 
-BundELF (pron. 'Bundle-f') is a Linux ELF dynamically-linked binary executable patcher and bundler. It creates distribution-independent executable package bundles, for any tool, utility, or application. Its bundled packages, consisting of patched binaries and dynamic libraries, provide much the same benefits as statically-compiled binaries but without the recompilation faff.
+BundELF (pron. 'Bundle-f') is a Linux ELF dynamically-linked binary executable patcher and bundler. It creates distribution-independent executable package bundles, for any tool, utility, or application. Its bundled packages, consisting of patched binaries and dynamic libraries, provide much the same benefits as statically-linked binaries but without the recompilation faff.
 
-Compared to statically-compiled binaries, BundELF-generated binaries make a much simpler and more generalised alternative, because statically-compiled binaries:
+Compared to statically-linked binaries, BundELF-generated binaries make a much simpler and more generalised alternative, because statically-linked binaries:
 1. are not always (or even often) readily available;
 2. can be hard and costly to compile manually;
 3. cannot be generated for certain applications and tools which inherently rely on being able to load dynamic libaries.
 
-By contrast, BundELF can patch and bundle _any_ pre-existing ELF binary -- tool, utility or application -- along with its dynamic (shared or non-shared) library dependencies, for relocation to (and execution from) any chosen filesystem location, making them completely portable and independent of the sourde distribution, much like statically-compiled binaries.
+Compared to namespaces or containers, which can also be used to separate concerns between dynamically-linked binaries with differing or conflicting library dependencies, BundELF bundles do not require containers or namespaces, and thus can be run within containers.
+
+By contrast, BundELF can patch and bundle _any_ pre-existing ELF binary -- tool, utility or application -- along with its dynamic (shared or non-shared) library dependencies, for relocation to (and execution from or within) any chosen filesystem location, making them completely portable and independent of the sourde distribution.
+
+The effect is much like statically-linked binaries or running dynamically-linked binaries within a container (but without the need for a container, and with the ability to run such binaries in containers, rather like running a container within a container).
 
 ## Why use BundELF?
 
@@ -67,8 +71,9 @@ N.B. At least one of `BUNDELF_BINARIES` or `BUNDELF_DYNAMIC_PATHS` must be provi
 ## Examples
 
 ```
-BUNDELF_BINARIES="node busybox curl bash git /usr/libexec/git-core/git /usr/libexec/git-core/" \
-BUNDELF_CODE_PATH="/opt/bundelf/myappbundle" \
+docker run --rm -it alpine
+apk add nodejs busybox bash git curl file patchelf
+export BUNDELF_BINARIES="node busybox curl bash git /usr/libexec/git-core/git /usr/libexec/git-core/" BUNDELF_CODE_PATH="/opt/bundelf/myappbundle"
 make-bundelf-bundle.sh --bundle
 ```
 
