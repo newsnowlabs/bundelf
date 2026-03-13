@@ -5,10 +5,10 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.1.4
+# Version: 1.1.6
 # Git: https://github.com/newsnowlabs/bundelf
 
-# make-bundelf-bundle.sh is used to prepare and package ELF binaries and their 
+# make-bundelf-bundle.sh is used to prepare and package ELF binaries and their
 # dynamic library dependencies for relocation to (and execution from) a new
 # location, making them completely portable and independent of the original
 # distribution.
@@ -56,7 +56,11 @@ BUNDELF_LIBPATH_TYPE="${BUNDELF_LIBPATH_TYPE:-relative}"
 # e.g. ld-musl-aarch64.so.1 (linux/arm64), ld-musl-armhf.so.1 (linux/arm/v7), ld-musl-x86_64.so.1 (linux/amd64)
 #   or ld-linux-aarch64.so.1 (linux/arm64), ld-linux-armhf.so.3 (linux/arm/v7), ld-linux-x86-64.so.2 (linux/amd64)
 LD_PATH=$(ls -1 /lib/ld-musl-* /lib/*-linux-*/ld-linux-*.so.* 2>/dev/null | head -n 1)
-LD_BIN=$(basename $LD_PATH)
+if [ -z "$LD_PATH" ]; then
+  echo "ERROR: No dynamic linker found in /lib (ld-musl-* or ld-linux-*.so.*)" >&2
+  exit 1
+fi
+LD_BIN=$(basename "$LD_PATH")
 
 TMP=/tmp/bundelf.$$
 
@@ -148,8 +152,8 @@ _verify_library_resolution() {
 
   while IFS= read -r lib; do
     echo -n "- lib: $lib ... " >&2
-    "$BUNDELF_CODE_PATH$LD_PATH" --list $lib 2>/dev/null | sed -nr '/=>/!d; s/^\s*(\S+)\s*=>\s*(.*?)(\s*\(0x[0-9a-f]+\))?$/- \2 \1/;/^.+$/p;' | egrep -v -- "^- ($BUNDELF_CODE_PATH_REGEX/|$BUNDELF_EXEC_PATH_REGEX/.*/$LD_BIN_REGEX)"
-    
+    "$BUNDELF_CODE_PATH$LD_PATH" --list "$lib" 2>/dev/null | sed -nr '/=>/!d; s/^\s*(\S+)\s*=>\s*(.*?)(\s*\(0x[0-9a-f]+\))?$/- \2 \1/;/^.+$/p;' | egrep -v -- "^- ($BUNDELF_CODE_PATH_REGEX/|$BUNDELF_EXEC_PATH_REGEX/.*/$LD_BIN_REGEX)"
+
     if [ $? -eq 0 ]; then
       status=1
       echo "BAD" >&2
@@ -216,7 +220,10 @@ scan_extra_libs() {
 # /usr/lib/libaio.so.1
 # /lib/libblkid.so.1
 find_lib_deps() {
-  cat "$@" | sort -u | xargs -P $(nproc) -I '{}' ldd '{}' 2>/dev/null | sed -nr 's/^\s*(.*)=>\s*(.*?)\s.*$/\2/p' | sort -u
+  # Use ldd to find library dependencies. The sed regex requires the resolved path to start with '/'
+  # to exclude ldd's "not found" output (e.g. "libfoo.so => not found") which would otherwise
+  # cause the word "not" to be captured as a path by the non-greedy match.
+  cat "$@" | sort -u | xargs -P $(nproc) -I '{}' ldd '{}' 2>/dev/null | sed -nr 's/^\s*(.*)=>\s*(\/[^ ]*)\s.*$/\2/p' | sort -u
 }
 
 copy_libs() {
@@ -229,7 +236,7 @@ copy_libs() {
   # N.B. These steps are all needed to ensure the Alpine dynamic linker can resolve library filepaths as required.
   #      For more, see https://www.musl-libc.org/doc/1.0.0/manual.html
   #
-  grep -v "^$BUNDELF_CODE_PATH_REGEX" "$@" | sort -u | while read file
+  grep -v "^$BUNDELF_CODE_PATH_REGEX" "$@" | sort -u | while IFS= read -r file
   do
     # Copy $file; and if $file is a symlink, also copy its target.
     # This could  result in duplicate copy operations if multiple symlinks point to the same target,
@@ -266,14 +273,14 @@ patch_binary() {
 replace_link_new() {
   local file="$1"
   local tmp_file
-  
+
   [ "$BUNDELF_LIBPATH_TYPE" = "relative" ] || return 0
-  
+
   # Handle symlinks - only replace if target is in a different directory
   if [ -L "$file" ]; then
     local link_target=$(readlink "$file")
     local file_dir=$(dirname "$(realpath "$file")")
-      
+
     if [ "${link_target#/}" = "$link_target" ]; then
         # Relative symlink: Resolve target relative to symlink location
         local target_full="$(cd "$(dirname "$file")" && realpath -m "$link_target")"
@@ -282,7 +289,7 @@ replace_link_new() {
         # Absolute symlink: Already have full path
         local target_dir=$(dirname "$(realpath "$link_target")")
     fi
-      
+
     if [ "$file_dir" != "$target_dir" ]; then
         tmp_file=$(mktemp)
         cp -L "$file" "$tmp_file" && mv "$tmp_file" "$file"
@@ -295,7 +302,7 @@ replace_link_new() {
   if [ "$link_count" -gt 1 ]; then
     local file_dir=$(dirname "$file")
     local needs_replacement=0
-    
+
     # Find all hard links to this inode and check their directories
     local inode=$(stat -c %i "$file")
     while IFS= read -r linked_file; do
@@ -315,13 +322,14 @@ replace_link_new() {
   return 0
 }
 
-# Function to replace links with direct copies when using relative RPATHs
+# Function to replace links with direct copies when using relative RPATHs.
+# Deprecated in 1.1.5: superseded by replace_link_new, which preserves same-directory symlinks.
 replace_link() {
     local file="$1"
     local tmp_file
-    
+
     [ "$BUNDELF_LIBPATH_TYPE" = "relative" ] || return 0
-    
+
     # Handle symlinks
     if [ -L "$file" ]; then
         tmp_file=$(mktemp)
@@ -343,17 +351,17 @@ replace_link() {
 
 patch_binaries_interpreter() {
   # For all ELF binaries, set the interpreter to our own.
-  for bin in $(sort -u "$@")
+  while IFS= read -r bin
   do
     patch_binary "$bin" || exit 1
-  done
+  done < <(sort -u "$@")
 }
 
 generate_extra_system_lib_paths() {
   for p in "$@"
   do
     echo "$p"
-  done 
+  done
 }
 
 escape_regex() {
@@ -378,12 +386,12 @@ generate_system_lib_paths() {
 generate_unique_rpath() {
   local prefix="$1"; shift
 
-  local abs_syspaths  
-  for s in $(sort -u "$@")
+  local abs_syspaths
+  while IFS= read -r s
   do
     # Append each system path, prefixed with $prefix, and suffixed with a colon
     abs_syspaths="$abs_syspaths$(echo "$prefix${s}:")"
-  done
+  done < <(sort -u "$@")
 
   # Remove trailing colon
   echo "$abs_syspaths" | sed 's/:$//'
@@ -406,7 +414,7 @@ patch_binaries_and_libs_rpath() {
 
   local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
 
-  for lib in $(sort -u "$@")
+  while IFS= read -r lib
   do
 
     if [ "$BUNDELF_LIBPATH_TYPE" = "absolute" ]; then
@@ -421,11 +429,11 @@ patch_binaries_and_libs_rpath() {
     else
       # If $lib is linked in different parts of the file hierarchy, then setting a relative RPATH on one file would break the correct RPATH set on another.
       # To prevent this, we un-hardlink any hardlinked files before we patch them.
-      replace_link "$lib"
+      replace_link_new "$lib"
 
       p=$(dirname "$lib" | sed -r "s|^$BUNDELF_CODE_PATH_REGEX[/]+||; s|[^/]+|..|g")
       # rpath="\$ORIGIN/$p/lib:\$ORIGIN/$p/usr/lib:\$ORIGIN/$p/usr/lib/xtables"
-      rpath="$(echo "$rpath_template" | sed "s|\$ORIGIN|\$ORIGIN/$p|g")"
+      rpath="$(echo "$rpath_template" | sed "s|\$ORIGIN|\$ORIGIN${p:+/$p}|g")"
 
       # Add node as a needed library to '.node' files, to avoid misleading ldd errors in verify()
       if [ -n "$BUNDELF_NODE_PATH" ] && echo "$lib" | grep -qE "\.node$"; then
@@ -433,7 +441,7 @@ patch_binaries_and_libs_rpath() {
         local NODE_BASENAME=$(basename $BUNDELF_NODE_PATH)
 
         # Augment rpath with relative path to the NODE_DIR
-        rpath="$rpath:\$ORIGIN/$p$NODE_DIR"
+        rpath="$rpath:\$ORIGIN/${p:+$p}$NODE_DIR"
 
         # Add a needed dynamic library dependency for NODE_BASENAME (will be searched for within the augmented rpath)
         echo patchelf --add-needed "$NODE_BASENAME" "$lib" >>$TMP/patchelf.log
@@ -450,7 +458,7 @@ patch_binaries_and_libs_rpath() {
     # which strangely have an interpreter set.
     patch_binary "$lib"
 
-  done
+  done < <(sort -u "$@")
 }
 
 copy_and_scan_for_dynamics() {
@@ -486,7 +494,7 @@ write_digest() {
 }
 
 init() {
-  for dep in file hexdump xargs patchelf
+  for dep in file hexdump xargs patchelf ldd
   do
     if ! [ -x "$(which $dep)" ]; then
       depsmissing=1
@@ -509,25 +517,31 @@ init() {
 }
 
 all() {
+  # Split space-separated env vars into arrays for correct multi-value handling
+  read -ra _bins              <<< "$BUNDELF_BINARIES"
+  read -ra _dynpaths          <<< "$BUNDELF_DYNAMIC_PATHS"
+  read -ra _extra_libs        <<< "$BUNDELF_EXTRA_LIBS"
+  read -ra _extra_syslibpaths <<< "$BUNDELF_EXTRA_SYSTEM_LIB_PATHS"
+
   # Copy elf binaries to BUNDELF_CODE_PATH and generate 'bins-copied' list of ELF binaries
-  copy_binaries "$BUNDELF_BINARIES" >>"$TMP/bins-copied"
+  copy_binaries "${_bins[@]}" >>"$TMP/bins-copied"
 
   # Scan for additional dynamic binaries and libs
-  copy_and_scan_for_dynamics "$BUNDELF_DYNAMIC_PATHS" >>"$TMP/scanned-dynamics"
+  copy_and_scan_for_dynamics "${_dynpaths[@]}" >>"$TMP/scanned-dynamics"
 
   # Add the intepretable dynamics to 'bins-copied'
   get_dynamics_interpretable "$TMP/scanned-dynamics" >>"$TMP/bins-copied"
 
-  # Add the non-intepretable dynamics to 'libs'
+  # Add the non-intepretable dynamics to 'libs-copied'
   get_dynamics_noninterpretable "$TMP/scanned-dynamics" >>"$TMP/libs-copied"
 
   # Scan for extra libraries not formally declared as dependencies
-  scan_extra_libs "$BUNDELF_EXTRA_LIBS" >>"$TMP/libs-extra"
+  scan_extra_libs "${_extra_libs[@]}" >>"$TMP/libs-extra"
 
   # Generate unique list of dynamic binaries and libs
   sort -u "$TMP/bins-copied" "$TMP/libs-copied" "$TMP/libs-extra" >>"$TMP/libs"
 
-  # Iteratively find all library dependencies of libraries in 'libs', until no new libraries are found  
+  # Iteratively find all library dependencies of libraries in 'libs', until no new libraries are found
   while true
   do
     # Find library dependencies of libraries in 'libs'; write to 'libs-new'
@@ -550,7 +564,7 @@ all() {
 
   # Generate non-unique list of system library paths:
   generate_system_lib_paths "$TMP/libs-copied" >>"$TMP/system-lib-paths"
-  generate_extra_system_lib_paths "$BUNDELF_EXTRA_SYSTEM_LIB_PATHS" >>"$TMP/system-lib-paths"
+  generate_extra_system_lib_paths "${_extra_syslibpaths[@]}" >>"$TMP/system-lib-paths"
 
   # Patch RPATH on all binaries in 'bins-copied' and libs in 'libs-copied'
   patch_binaries_and_libs_rpath "$TMP/bins-copied" "$TMP/libs-copied"
@@ -558,7 +572,7 @@ all() {
   # Write a summary of binaries and libraries to BUNDELF_CODE_PATH
   write_digest
 
-  # Copy LD and and create copnvenience symlink it to ld
+  # Copy LD and create convenience symlink to ld
   cp --parents "$LD_PATH" "$BUNDELF_CODE_PATH"
   ln -sf $(echo "$LD_PATH" | sed -r 's|^/lib/|./|') "$BUNDELF_CODE_PATH/lib/ld"
 }
