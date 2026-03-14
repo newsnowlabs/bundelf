@@ -5,7 +5,7 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.1.3
+# Version: 1.1.4
 # Git: https://github.com/newsnowlabs/bundelf
 
 # make-bundelf-bundle.sh is used to prepare and package ELF binaries and their 
@@ -148,7 +148,7 @@ _verify_library_resolution() {
 
   while IFS= read -r lib; do
     echo -n "- lib: $lib ... " >&2
-    $BUNDELF_CODE_PATH$LD_PATH --list $lib 2>/dev/null | sed -nr '/=>/!d; s/^\s*(\S+)\s*=>\s*(.*?)(\s*\(0x[0-9a-f]+\))?$/- \2 \1/;/^.+$/p;' | egrep -v -- "^- ($BUNDELF_CODE_PATH_REGEX/|$BUNDELF_EXEC_PATH_REGEX/.*/$LD_BIN_REGEX)"
+    "$BUNDELF_CODE_PATH$LD_PATH" --list $lib 2>/dev/null | sed -nr '/=>/!d; s/^\s*(\S+)\s*=>\s*(.*?)(\s*\(0x[0-9a-f]+\))?$/- \2 \1/;/^.+$/p;' | egrep -v -- "^- ($BUNDELF_CODE_PATH_REGEX/|$BUNDELF_EXEC_PATH_REGEX/.*/$LD_BIN_REGEX)"
     
     if [ $? -eq 0 ]; then
       status=1
@@ -165,7 +165,7 @@ verify() {
   local final_status=0
 
   # Deduce BUNDELF_CODE_PATH from this script's execution path, when needed (useful when called with --verify within an alternative environment).
-  [ -z $BUNDELF_CODE_PATH ] && BUNDELF_CODE_PATH=$(realpath $(dirname $0)/..)
+  [ -z "$BUNDELF_CODE_PATH" ] && BUNDELF_CODE_PATH=$(realpath $(dirname $0)/..)
 
   # Fast verifications
   _verify_interpreter_paths || final_status=1
@@ -183,9 +183,9 @@ copy_binaries() {
   # Copy any binaries we require to the install location, outputing their new paths.
 
   if [ -n "$BUNDELF_MERGE_BINDIRS" ]; then
-    mkdir -p $BUNDELF_CODE_PATH/bin
+    mkdir -p "$BUNDELF_CODE_PATH/bin"
   else
-    mkdir -p $BUNDELF_CODE_PATH
+    mkdir -p "$BUNDELF_CODE_PATH"
   fi
 
   for bin in "$@"
@@ -195,10 +195,10 @@ copy_binaries() {
 
     if [ -n "$file" ]; then
       if [ -z "$BUNDELF_MERGE_BINDIRS" ]; then
-        cp -a --dereference --parents $file $BUNDELF_CODE_PATH
+        cp -a --dereference --parents "$file" "$BUNDELF_CODE_PATH"
         echo "$BUNDELF_CODE_PATH$file"
       else
-        cp -p --dereference $file $BUNDELF_CODE_PATH/bin/
+        cp -p --dereference "$file" "$BUNDELF_CODE_PATH/bin/"
         echo "$BUNDELF_CODE_PATH/bin/$basename"
       fi
     fi
@@ -220,7 +220,7 @@ find_lib_deps() {
 }
 
 copy_libs() {
-  mkdir -p $BUNDELF_CODE_PATH
+  mkdir -p "$BUNDELF_CODE_PATH"
 
   local BUNDELF_CODE_PATH_REGEX=$(escape_regex "$BUNDELF_CODE_PATH")
 
@@ -234,13 +234,13 @@ copy_libs() {
     # Copy $file; and if $file is a symlink, also copy its target.
     # This could  result in duplicate copy operations if multiple symlinks point to the same target,
     # but has the advantage of simplicity.
-    cp -a --parents $file $BUNDELF_CODE_PATH
+    cp -a --parents "$file" "$BUNDELF_CODE_PATH"
 
     # If $file is a symlink, then copy its target too, as the target might not otherwise be copied.
     if [ -L "$file" ]; then
       # local target=$(realpath -m "$(dirname "$file")/$(readlink "$file")")
       local target=$(dirname "$file")/$(readlink "$file")
-      cp -a --parents $target $BUNDELF_CODE_PATH
+      cp -a --parents "$target" "$BUNDELF_CODE_PATH"
     fi
 
     if [ "$file" != "$LD_PATH" ]; then
@@ -252,8 +252,8 @@ copy_libs() {
 patch_binary() {
   local bin="$1"
 
-  if patchelf --set-interpreter $BUNDELF_EXEC_PATH$LD_PATH $bin 2>/dev/null; then
-    echo patchelf --set-interpreter $BUNDELF_EXEC_PATH$LD_PATH $bin >>$TMP/patchelf.log
+  if patchelf --set-interpreter "$BUNDELF_EXEC_PATH$LD_PATH" "$bin" 2>/dev/null; then
+    echo patchelf --set-interpreter "$BUNDELF_EXEC_PATH$LD_PATH" "$bin" >>$TMP/patchelf.log
     return 0
   fi
 
@@ -352,7 +352,7 @@ patch_binaries_interpreter() {
 generate_extra_system_lib_paths() {
   for p in "$@"
   do
-    echo $p
+    echo "$p"
   done 
 }
 
@@ -386,7 +386,7 @@ generate_unique_rpath() {
   done
 
   # Remove trailing colon
-  echo $abs_syspaths | sed 's/:$//'
+  echo "$abs_syspaths" | sed 's/:$//'
 }
 
 patch_binaries_and_libs_rpath() {
@@ -441,7 +441,7 @@ patch_binaries_and_libs_rpath() {
       fi
     fi
 
-    echo patchelf --force-rpath --set-rpath ${rpath@Q} "$lib" >>$TMP/patchelf.log
+    echo patchelf --force-rpath --set-rpath "${rpath@Q}" "$lib" >>$TMP/patchelf.log
     patchelf --force-rpath --set-rpath \
       "$rpath" \
       "$lib" >>$TMP/patchelf.log 2>&1 || exit 1
@@ -458,14 +458,14 @@ copy_and_scan_for_dynamics() {
   # - This should includes all Theia .node files and spawn-helper, but not statically-linked binaries like 'rg'
   # - The only way to tell if a file is an ELF binary (or library) is to check the first 4 bytes for the magic byte sequence.
 
-  mkdir -p $BUNDELF_CODE_PATH
+  mkdir -p "$BUNDELF_CODE_PATH"
 
   for q in "$@"
   do
     # Skip non-existent paths
     [ -d "$q" ] || continue
 
-    tar cv "$q" 2>/dev/null | tar x -C $BUNDELF_CODE_PATH/
+    tar cv "$q" 2>/dev/null | tar x -C "$BUNDELF_CODE_PATH/"
 
     find "$q" -type f ! -name '*.o' -print0 | xargs -0 -P $(nproc) -I '{}' hexdump -n 4 -e '4/1 "%2x" " {}\n"' {} | sed '/^7f454c46/!d; s/^7f454c46 //' | xargs -P $(nproc) file | grep dynamically
   done
@@ -481,8 +481,8 @@ get_dynamics_noninterpretable() {
 
 write_digest() {
   # Prepare full and unique list of ELF binaries and libs for reference purposes and for checking
-  sort -u $TMP/bins-copied >$BUNDELF_CODE_PATH/.binelfs
-  sort -u $TMP/libs-copied >$BUNDELF_CODE_PATH/.libelfs
+  sort -u $TMP/bins-copied >"$BUNDELF_CODE_PATH/.binelfs"
+  sort -u $TMP/libs-copied >"$BUNDELF_CODE_PATH/.libelfs"
 }
 
 init() {
@@ -498,69 +498,69 @@ init() {
 
   # Initialise
   mkdir -p "$TMP"
-  >$TMP/bins-copied
-  >$TMP/libs-copied
-  >$TMP/libs
-  >$TMP/libs-extra
-  >$TMP/libs-deps
-  >$TMP/libs-new
-  >$TMP/scanned-dynamics
-  >$TMP/system-lib-paths
+  >"$TMP/bins-copied"
+  >"$TMP/libs-copied"
+  >"$TMP/libs"
+  >"$TMP/libs-extra"
+  >"$TMP/libs-deps"
+  >"$TMP/libs-new"
+  >"$TMP/scanned-dynamics"
+  >"$TMP/system-lib-paths"
 }
 
 all() {
   # Copy elf binaries to BUNDELF_CODE_PATH and generate 'bins-copied' list of ELF binaries
-  copy_binaries $BUNDELF_BINARIES >>$TMP/bins-copied
+  copy_binaries "$BUNDELF_BINARIES" >>"$TMP/bins-copied"
 
   # Scan for additional dynamic binaries and libs
-  copy_and_scan_for_dynamics $BUNDELF_DYNAMIC_PATHS >>$TMP/scanned-dynamics
+  copy_and_scan_for_dynamics "$BUNDELF_DYNAMIC_PATHS" >>"$TMP/scanned-dynamics"
 
   # Add the intepretable dynamics to 'bins-copied'
-  get_dynamics_interpretable $TMP/scanned-dynamics >>$TMP/bins-copied
+  get_dynamics_interpretable "$TMP/scanned-dynamics" >>"$TMP/bins-copied"
 
   # Add the non-intepretable dynamics to 'libs'
-  get_dynamics_noninterpretable $TMP/scanned-dynamics >>$TMP/libs-copied
+  get_dynamics_noninterpretable "$TMP/scanned-dynamics" >>"$TMP/libs-copied"
 
   # Scan for extra libraries not formally declared as dependencies
-  scan_extra_libs $BUNDELF_EXTRA_LIBS >>$TMP/libs-extra
+  scan_extra_libs "$BUNDELF_EXTRA_LIBS" >>"$TMP/libs-extra"
 
   # Generate unique list of dynamic binaries and libs
-  sort -u $TMP/bins-copied $TMP/libs-copied $TMP/libs-extra >>$TMP/libs
+  sort -u "$TMP/bins-copied" "$TMP/libs-copied" "$TMP/libs-extra" >>"$TMP/libs"
 
   # Iteratively find all library dependencies of libraries in 'libs', until no new libraries are found  
   while true
   do
     # Find library dependencies of libraries in 'libs'; write to 'libs-new'
-    find_lib_deps $TMP/libs >>$TMP/libs-deps
+    find_lib_deps "$TMP/libs" >>"$TMP/libs-deps"
 
-    sort -u $TMP/libs $TMP/libs-deps >$TMP/libs-new
+    sort -u "$TMP/libs" "$TMP/libs-deps" >"$TMP/libs-new"
 
-    if diff -q $TMP/libs $TMP/libs-new >/dev/null 2>&1; then
+    if diff -q "$TMP/libs" "$TMP/libs-new" >/dev/null 2>&1; then
       break
     fi
 
-    mv $TMP/libs-new $TMP/libs
+    mv "$TMP/libs-new" "$TMP/libs"
   done
 
   # Copy libraries from 'libs' to BUNDELF_CODE_PATH and itemise new copied paths (overwriting previous incomplete 'libs-copied')
-  copy_libs $TMP/libs >$TMP/libs-copied
+  copy_libs "$TMP/libs" >"$TMP/libs-copied"
 
   # Patch interpreter on all ELF binaries in 'bins-copied'
-  patch_binaries_interpreter $TMP/bins-copied
+  patch_binaries_interpreter "$TMP/bins-copied"
 
   # Generate non-unique list of system library paths:
-  generate_system_lib_paths $TMP/libs-copied >>$TMP/system-lib-paths
-  generate_extra_system_lib_paths $BUNDELF_EXTRA_SYSTEM_LIB_PATHS >>$TMP/system-lib-paths
+  generate_system_lib_paths "$TMP/libs-copied" >>"$TMP/system-lib-paths"
+  generate_extra_system_lib_paths "$BUNDELF_EXTRA_SYSTEM_LIB_PATHS" >>"$TMP/system-lib-paths"
 
   # Patch RPATH on all binaries in 'bins-copied' and libs in 'libs-copied'
-  patch_binaries_and_libs_rpath $TMP/bins-copied $TMP/libs-copied
+  patch_binaries_and_libs_rpath "$TMP/bins-copied" "$TMP/libs-copied"
 
   # Write a summary of binaries and libraries to BUNDELF_CODE_PATH
   write_digest
 
   # Copy LD and and create copnvenience symlink it to ld
-  cp --parents $LD_PATH $BUNDELF_CODE_PATH
-  ln -sf $(echo $LD_PATH | sed -r 's|^/lib/|./|') $BUNDELF_CODE_PATH/lib/ld
+  cp --parents "$LD_PATH" "$BUNDELF_CODE_PATH"
+  ln -sf $(echo "$LD_PATH" | sed -r 's|^/lib/|./|') "$BUNDELF_CODE_PATH/lib/ld"
 }
 
 # Run with --verify from within any distribution, to check that all dynamic library dependencies
