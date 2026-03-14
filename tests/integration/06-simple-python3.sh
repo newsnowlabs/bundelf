@@ -37,6 +37,8 @@ case "${TEST_PHASE:-build}" in
         
         # Create the bundle
         export BUNDELF_BINARIES="$PRIMARY_BIN"
+        export BUNDELF_EXTRA_LIBS="/usr/lib/python3.12"
+        export BUNDELF_EXTRA_SYSTEM_LIB_PATHS="/usr/lib/python3.12"
         
         echo "Creating $PRIMARY_BIN bundle in $BUNDELF_CODE_PATH..."
         $BUNDELF_PATH/make-bundelf-bundle.sh --bundle || exit 1
