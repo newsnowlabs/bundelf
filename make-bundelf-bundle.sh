@@ -5,7 +5,7 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.1.5
+# Version: 1.1.7
 # Git: https://github.com/newsnowlabs/bundelf
 
 # make-bundelf-bundle.sh is used to prepare and package ELF binaries and their
@@ -199,7 +199,8 @@ copy_binaries() {
 
     if [ -n "$file" ]; then
       if [ -z "$BUNDELF_MERGE_BINDIRS" ]; then
-        cp -a --dereference --parents "$file" "$BUNDELF_CODE_PATH"
+        mkdir -p "$BUNDELF_CODE_PATH$(dirname "$file")"
+        cp -a --dereference "$file" "$BUNDELF_CODE_PATH$(dirname "$file")/"
         echo "$BUNDELF_CODE_PATH$file"
       else
         cp -p --dereference "$file" "$BUNDELF_CODE_PATH/bin/"
@@ -241,13 +242,18 @@ copy_libs() {
     # Copy $file; and if $file is a symlink, also copy its target.
     # This could  result in duplicate copy operations if multiple symlinks point to the same target,
     # but has the advantage of simplicity.
-    cp -a --parents "$file" "$BUNDELF_CODE_PATH"
+    # N.B. We use mkdir -p + cp rather than cp --parents, to avoid failures on usrmerge systems
+    # where /lib is a symlink to usr/lib: cp -a --parents would copy /lib as a symlink, and
+    # subsequent directory creation through it would fail.
+    mkdir -p "$BUNDELF_CODE_PATH$(dirname "$file")"
+    cp -a "$file" "$BUNDELF_CODE_PATH$(dirname "$file")/"
 
     # If $file is a symlink, then copy its target too, as the target might not otherwise be copied.
     if [ -L "$file" ]; then
       # local target=$(realpath -m "$(dirname "$file")/$(readlink "$file")")
       local target=$(dirname "$file")/$(readlink "$file")
-      cp -a --parents "$target" "$BUNDELF_CODE_PATH"
+      mkdir -p "$BUNDELF_CODE_PATH$(dirname "$target")"
+      cp -a "$target" "$BUNDELF_CODE_PATH$(dirname "$target")/"
     fi
 
     if [ "$file" != "$LD_PATH" ]; then
@@ -573,7 +579,8 @@ all() {
   write_digest
 
   # Copy LD and create convenience symlink to ld
-  cp --parents "$LD_PATH" "$BUNDELF_CODE_PATH"
+  mkdir -p "$BUNDELF_CODE_PATH$(dirname "$LD_PATH")"
+  cp "$LD_PATH" "$BUNDELF_CODE_PATH$(dirname "$LD_PATH")/"
   ln -sf $(echo "$LD_PATH" | sed -r 's|^/lib/|./|') "$BUNDELF_CODE_PATH/lib/ld"
 }
 
