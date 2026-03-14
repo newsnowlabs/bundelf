@@ -112,7 +112,7 @@ _run_build_phase() {
     cat > "$docker_dir/Dockerfile" << EOF
 FROM $build_dist
 RUN if command -v apk >/dev/null; then \
-        apk add --no-cache bash file patchelf hexdump; \
+        apk add --no-cache bash file patchelf hexdump coreutils findutils; \
     elif command -v apt-get >/dev/null; then \
         apt-get update && \
         apt-get install -y file patchelf bsdextrautils; \
