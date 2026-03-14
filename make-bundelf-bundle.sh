@@ -5,7 +5,7 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.1.8
+# Version: 1.1.9
 # Git: https://github.com/newsnowlabs/bundelf
 
 # make-bundelf-bundle.sh is used to prepare and package ELF binaries and their
@@ -502,7 +502,7 @@ get_dynamics_noninterpretable() {
 write_digest() {
   # Prepare full and unique list of ELF binaries and libs for reference purposes and for checking
   sort -u $TMP/bins-copied >"$BUNDELF_CODE_PATH/.binelfs"
-  sort -u $TMP/libs-copied >"$BUNDELF_CODE_PATH/.libelfs"
+  sort -u $TMP/libs-copied-final >"$BUNDELF_CODE_PATH/.libelfs"
 }
 
 init() {
@@ -520,6 +520,7 @@ init() {
   mkdir -p "$TMP"
   >"$TMP/bins-copied"
   >"$TMP/libs-copied"
+  >"$TMP/libs-copied-final"
   >"$TMP/libs"
   >"$TMP/libs-extra"
   >"$TMP/libs-deps"
@@ -569,18 +570,18 @@ all() {
   done
 
   # Copy system libraries from 'libs' to BUNDELF_CODE_PATH and write the complete set of destination
-  # paths (newly copied + pre-existing) to 'libs-copied', for use by patch_binaries_and_libs_rpath.
-  copy_libs "$TMP/libs" >"$TMP/libs-copied"
+  # paths (newly copied + pre-existing) to 'libs-copied-final', for use by patch_binaries_and_libs_rpath.
+  copy_libs "$TMP/libs" >"$TMP/libs-copied-final"
 
   # Patch interpreter on all ELF binaries in 'bins-copied'
   patch_binaries_interpreter "$TMP/bins-copied"
 
   # Generate non-unique list of system library paths:
-  generate_system_lib_paths "$TMP/libs-copied" >>"$TMP/system-lib-paths"
+  generate_system_lib_paths "$TMP/libs-copied-final" >>"$TMP/system-lib-paths"
   generate_extra_system_lib_paths "${_extra_syslibpaths[@]}" >>"$TMP/system-lib-paths"
 
-  # Patch RPATH on all binaries in 'bins-copied' and libs in 'libs-copied'
-  patch_binaries_and_libs_rpath "$TMP/bins-copied" "$TMP/libs-copied"
+  # Patch RPATH on all binaries in 'bins-copied' and libs in 'libs-copied-final'
+  patch_binaries_and_libs_rpath "$TMP/bins-copied" "$TMP/libs-copied-final"
 
   # Write a summary of binaries and libraries to BUNDELF_CODE_PATH
   write_digest
