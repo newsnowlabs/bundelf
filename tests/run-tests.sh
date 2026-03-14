@@ -232,6 +232,7 @@ EOF
                 echo -e "${GREEN}✓ Test passed${NC}"
             else
                 echo -e "${RED}✗ Test failed on $test_dist${NC}"
+                echo "Reproduce build container with: docker run --rm -it --platform linux/$arch -v $SCRIPT_DIR:/tests/:ro -v $(dirname "$SCRIPT_DIR"):/bundelf:ro -v $bundle_volume:/bundles -e TEST_PHASE=build -e BUNDELF_PATH=/bundelf -e BUNDELF_MERGE_BINDIRS=$merge_bindirs -e BUNDELF_LIBPATH_TYPE=$libpath_type -e BUNDELF_BUNDLES_PATH=/bundles -e DIST=$build_dist -e ARCH=$arch bundelf-build:$build_config bash"
                 echo "Reproduce test container with : docker run --rm -it --platform linux/$arch -v $SCRIPT_DIR:/tests/:ro -v $bundle_volume:/bundles:ro -e TEST_PHASE=verify -e BUNDELF_MERGE_BINDIRS=$merge_bindirs -e BUNDELF_LIBPATH_TYPE=$libpath_type -e BUNDELF_BUNDLES_PATH=/bundles -e DIST=$test_dist -e ARCH=$arch bundelf-test:$test_config bash"
                 echo "See log file: $test_log"
                 excerpt_log "$test_log"
