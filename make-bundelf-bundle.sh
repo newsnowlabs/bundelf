@@ -5,7 +5,7 @@
 #
 # Licence: Apache 2.0
 # Authors: Struan Bartlett, NewsNow Labs, NewsNow Publishing Ltd
-# Version: 1.1.7
+# Version: 1.1.8
 # Git: https://github.com/newsnowlabs/bundelf
 
 # make-bundelf-bundle.sh is used to prepare and package ELF binaries and their
@@ -260,6 +260,12 @@ copy_libs() {
       echo "$BUNDELF_CODE_PATH$file"
     fi
   done
+
+  # Also output paths that were already in BUNDELF_CODE_PATH (e.g. .node files from
+  # BUNDELF_DYNAMIC_PATHS): they were skipped by copy_libs above since they don't need
+  # re-copying, but must appear in the output so callers have a complete set of destination
+  # paths for RPATH patching.
+  grep "^$BUNDELF_CODE_PATH_REGEX" "$@" | sort -u
 }
 
 patch_binary() {
@@ -562,7 +568,8 @@ all() {
     mv "$TMP/libs-new" "$TMP/libs"
   done
 
-  # Copy libraries from 'libs' to BUNDELF_CODE_PATH and itemise new copied paths (overwriting previous incomplete 'libs-copied')
+  # Copy system libraries from 'libs' to BUNDELF_CODE_PATH and write the complete set of destination
+  # paths (newly copied + pre-existing) to 'libs-copied', for use by patch_binaries_and_libs_rpath.
   copy_libs "$TMP/libs" >"$TMP/libs-copied"
 
   # Patch interpreter on all ELF binaries in 'bins-copied'
